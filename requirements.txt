@@ -1,0 +1,4 @@
+absl-py
+sentencepiece
+tensorflow>=2.0.0
+tensorflow_text>=2.0.0

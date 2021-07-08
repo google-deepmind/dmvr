@@ -1,0 +1,6 @@
+0 <pad>
+1 <bos>
+2 <eos>
+3 <unk>
+4 hello
+5 world

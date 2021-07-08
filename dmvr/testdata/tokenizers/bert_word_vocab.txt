@@ -1,0 +1,6 @@
+[CLS]
+[PAD]
+[UNK]
+[SEP]
+hello
+world
