@@ -418,7 +418,7 @@ def add_text(
     append_eos: bool = False,
     keep_raw_string: bool = False,
     max_num_captions: int = 1,
-    max_num_tokens: int = 16,
+    max_num_tokens: Optional[int] = 16,
     sync_random_state: bool = False):
   """Adds functions to process text feature to builders.
 
@@ -470,7 +470,8 @@ def add_text(
       are `max_num_captions` in total.
     max_num_tokens: Maximum number of tokens to keep from the text for each
       caption. If there are more tokens, sequence is cropped, if less, the
-      caption is padded using the tokenizer pad id.
+      caption is padded using the tokenizer pad id. The sequence is unmodified
+      if max_num_tokens is None.
     sync_random_state: Whether to use stateful option to keep random operations
       in sync between different modalities. All modalities having this option
       `True` will use the same outcome in random operations used for sampling
@@ -512,11 +513,13 @@ def add_text(
           prepend_bos, append_eos, max_num_tokens, keep_raw_string),
       fn_name=f'{output_feature_name}_tokenization')
 
-  # Set text shape.
-  preprocessor_builder.add_fn(
-      fn=lambda x: processors.set_shape(x, (max_num_captions, max_num_tokens)),
-      feature_name=output_feature_name,
-      fn_name=f'{output_feature_name}_set_shape')
+  if max_num_tokens is not None:
+    # Set text shape.
+    shape = (max_num_captions, max_num_tokens)
+    preprocessor_builder.add_fn(
+        fn=lambda x: processors.set_shape(x, shape),
+        feature_name=output_feature_name,
+        fn_name=f'{output_feature_name}_set_shape')
 
 
 def add_audio(
