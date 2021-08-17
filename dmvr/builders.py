@@ -36,6 +36,7 @@ FilterFn = Callable[[FeaturesDict], tf.Tensor]  # Boolean tensor of shape ().
 # Default name of features for each modality in `FeaturesDict`.
 # User should reference those via variable and not string directly.
 AUDIO_FEATURE_NAME = 'audio'
+AUDIO_MEL_FEATURE_NAME = 'audio_mel'
 FLOW_FEATURE_NAME = 'flow'
 IMAGE_FEATURE_NAME = 'image'
 KEY_FEATURE_NAME = 'key'

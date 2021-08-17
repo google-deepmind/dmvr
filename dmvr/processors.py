@@ -718,6 +718,205 @@ def tokenize(features: builders.FeaturesDict,
   return features
 
 
+def _preemphasis(audio: tf.Tensor, coef: float = 0.97) -> tf.Tensor:
+  """Scale up the high frequency components in the waveform.
+
+  Args:
+    audio: Input waveform.
+    coef: Pre-emphasis coefficient.
+
+  Returns:
+    Pre-emphasized audio.
+  """
+  return tf.concat([audio[:1], audio[1:] - coef * audio[:-1]], axis=0)
+
+
+def compute_audio_spectrogram(
+    features: builders.FeaturesDict,
+    num_subclips: int = 1,
+    sample_rate: int = 48000,
+    spectrogram_type: str = 'logmf',
+    frame_length: int = 2048,
+    frame_step: int = 1024,
+    num_features: int = 80,
+    lower_edge_hertz: float = 80.0,
+    upper_edge_hertz: float = 7600.0,
+    preemphasis: Optional[float] = None,
+    normalize: bool = False,
+    audio_feature_name: str = builders.AUDIO_MEL_FEATURE_NAME,
+    spectrogram_feature_name: str = builders.AUDIO_MEL_FEATURE_NAME,
+    ) -> builders.FeaturesDict:
+  """Computes audio spectrograms.
+
+  Args:
+    features: A dictionary of features.
+    num_subclips: Number of test clips (1 by default). If more than 1, this will
+      sample multiple linearly spaced clips within each audio at test time.
+      If 1, then a single clip in the middle of the audio is sampled. The clips
+      are aggreagated in the batch dimension.
+    sample_rate: The sample rate of the input audio.
+    spectrogram_type: The type of the spectrogram to be extracted from the
+      waveform. Can be either `spectrogram`, `logmf`, and `mfcc`.
+    frame_length: The length of each spectroram frame.
+    frame_step: The stride of spectrogram frames.
+    num_features: The number of spectrogram features.
+    lower_edge_hertz: Lowest frequency to consider.
+    upper_edge_hertz: Highest frequency to consider.
+    preemphasis: The strength of pre-emphasis on the waveform. If None, no
+      pre-emphasis will be applied.
+    normalize: Whether to normalize the waveform or not.
+    audio_feature_name: The name of the raw audio feature in features.
+    spectrogram_feature_name: The name of the spectrogram feature in features.
+
+  Returns:
+    A FeaturesDict containing the extracted spectrograms.
+
+  Raises:
+    ValueError: if `spectrogram_type` is one of `spectrogram`, `logmf`, or
+      `mfcc`.
+  """
+  if spectrogram_type not in ['spectrogram', 'logmf', 'mfcc']:
+    raise ValueError('Spectrogram type should be one of `spectrogram`, '
+                     '`logmf`, or `mfcc`, got {}'.format(spectrogram_type))
+
+  raw_audio = features[audio_feature_name]
+  if normalize:
+    raw_audio /= (
+        tf.reduce_max(tf.abs(raw_audio), axis=-1, keepdims=True) + 1e-8)
+    features[audio_feature_name] = raw_audio
+  if num_subclips > 1:
+    raw_audio = tf.reshape(raw_audio, [num_subclips, -1])
+  if preemphasis is not None:
+    raw_audio = _preemphasis(raw_audio, preemphasis)
+
+  def _extract_spectrogram(
+      waveform: tf.Tensor,
+      spectrogram_type: str) -> tf.Tensor:
+    stfts = tf.signal.stft(waveform,
+                           frame_length=frame_length,
+                           frame_step=frame_step,
+                           fft_length=frame_length,
+                           window_fn=tf.signal.hann_window,
+                           pad_end=True)
+    spectrograms = tf.abs(stfts)
+
+    if spectrogram_type == 'spectrogram':
+      return spectrograms[..., :num_features]
+
+    # Warp the linear scale spectrograms into the mel-scale.
+    num_spectrogram_bins = stfts.shape[-1]
+    linear_to_mel_weight_matrix = tf.signal.linear_to_mel_weight_matrix(
+        num_features, num_spectrogram_bins, sample_rate, lower_edge_hertz,
+        upper_edge_hertz)
+    mel_spectrograms = tf.tensordot(
+        spectrograms, linear_to_mel_weight_matrix, 1)
+    mel_spectrograms.set_shape(spectrograms.shape[:-1].concatenate(
+        linear_to_mel_weight_matrix.shape[-1:]))
+
+    # Compute a stabilized log to get log-magnitude mel-scale spectrograms.
+    log_mel_spectrograms = tf.math.log(mel_spectrograms + 1e-6)
+    if spectrogram_type == 'logmf':
+      return log_mel_spectrograms
+
+    # Compute MFCCs from log_mel_spectrograms and take the first 13.
+    mfccs = tf.signal.mfccs_from_log_mel_spectrograms(
+        log_mel_spectrograms)[..., :13]
+    return mfccs
+
+  spectrogram = _extract_spectrogram(raw_audio, spectrogram_type)
+  features[spectrogram_feature_name] = spectrogram
+  return features
+
+
+def _resample_audio_fft(
+    x: tf.Tensor,
+    in_sample_rate: int,
+    out_sample_rate: int,
+    resolution_bits: Optional[float] = None) -> tf.Tensor:
+  """Resample audio using FFTs.
+
+  Args:
+    x: Input audio signal.
+    in_sample_rate: The original sample rate of the input audio.
+    out_sample_rate: The target sample rate.
+    resolution_bits: Resolution bits used to scale the FFTs. If None no scaling
+      is used.
+
+  Returns:
+    The resampled audio signal.
+  """
+  axis = -1  # tf.signal.fft operates on the innermost dimension of x
+  if in_sample_rate == out_sample_rate:
+    return x
+
+  scale = 2**(resolution_bits - 1) if resolution_bits else None
+
+  if scale:
+    x /= scale
+
+  factor = float(out_sample_rate) / in_sample_rate
+  original_size = tf.shape(x)[axis]
+  resampled_size = tf.cast(
+      tf.cast(original_size, dtype=tf.float32) * factor, dtype=tf.int32)
+
+  x_ = tf.signal.fft(tf.cast(x, dtype=tf.complex64))
+
+  shape = x.get_shape().as_list()
+  rank = len(shape)
+  sl_beg = [slice(None)] * rank
+  sl_end = [slice(None)] * rank
+
+  min_size = tf.minimum(resampled_size, original_size)
+  sl_beg[axis] = slice(0, (min_size + 1) // 2)
+  sl_end[axis] = slice(-(min_size - 1) // 2, None)
+
+  # Compute padding: empty unless upsampling (resampled_size > original_size).
+  pad_shape = list(shape)
+  pad_shape[axis] = tf.maximum(0, resampled_size - original_size)
+  padding = tf.zeros(pad_shape, dtype=x_.dtype)
+
+  y_ = tf.concat([x_[sl_beg], padding, x_[sl_end]], axis=axis)
+  y = tf.signal.ifft(y_)
+  y = tf.math.real(y) * factor
+
+  # Deliberately subtract 1 to prevent clipped values from going out of range.
+  y = tf.clip_by_value(y, -1, 1)
+  if scale:
+    y *= scale - 1
+  if shape[axis] is not None:
+    shape[axis] = int(shape[axis] * factor)
+  y.set_shape(shape)
+
+  return y
+
+
+def resample_audio(
+    audio: tf.Tensor,
+    in_sample_rate: int,
+    out_sample_rate: int,
+    is_training: bool = True,
+    num_subclips: int = 1,
+    ) -> tf.Tensor:
+  """Resamples raw audio.
+
+  Args:
+    audio: Input audio signal.
+    in_sample_rate: The original sample rate of the input audio.
+    out_sample_rate: The target sample rate.
+    is_training: If the current stage is training.
+    num_subclips: Number of test clips (1 by default). If more than 1, this will
+      sample multiple linearly spaced clips within each audio at test time.
+      If 1, then a single clip in the middle of the audio is sampled. The clips
+      are aggreagated in the batch dimension.
+
+  Returns:
+    The resampled audio signal.
+  """
+  if num_subclips > 1 and not is_training:
+    audio = tf.reshape(audio, [num_subclips, -1])
+  return _resample_audio_fft(audio, in_sample_rate, out_sample_rate)
+
+
 # ----------------------------------------------------------------------
 # --------------- Methods used in postprocess functions. ---------------
 # ----------------------------------------------------------------------

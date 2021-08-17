@@ -14,6 +14,7 @@
 
 """Utils for adding modalities."""
 
+import functools
 from typing import Optional
 
 from absl import logging
@@ -526,12 +527,15 @@ def add_audio(
     parser_builder: builders.BaseParserBuilder,
     sampler_builder: builders.SamplerBuilder,
     postprocessor_builder: builders.PostprocessorBuilder,
+    preprocessor_builder: Optional[builders.PreprocessorBuilder] = None,
     input_feature_name: str = 'WAVEFORM/feature/floats',
     output_feature_name: str = builders.AUDIO_FEATURE_NAME,
     is_training: bool = True,
     # Audio related parameters.
     num_samples: int = 30720,
     stride: int = 1,
+    sample_rate: Optional[int] = 48000,
+    target_sample_rate: Optional[int] = None,
     num_test_clips: int = 1,
     sync_random_state: bool = True):
   """Adds functions to process audio feature to builders.
@@ -580,6 +584,7 @@ def add_audio(
     parser_builder: An instance of a `builders.BaseParserBuilder`.
     sampler_builder: An instance of a `builders.SamplerBuilder`.
     postprocessor_builder: An instance of a `builders.PostprocessorBuilder`.
+    preprocessor_builder: An instance of a `builders.PreprocessorBuilder`.
     input_feature_name: Name of the feature in the input `tf.train.Example` or
       `tf.train.SequenceExample`. Exposing this as an argument allows using this
       function for different audio features within a single dataset.
@@ -590,6 +595,9 @@ def add_audio(
       used.
     num_samples: Number of samples per subclip.
     stride: Temporal stride to sample audio signal.
+    sample_rate: The original sample rate of the input audio stored in sstables.
+    target_sample_rate: If this is not None, the target new sample rate of the
+      waveforms. Fast Fourier Transforms will be triggered if true.
     num_test_clips: Number of test clips (1 by default). If more than 1, this
       will sample multiple linearly spaced clips within each audio at test time.
       If 1, then a single clip in the middle of the audio is sampled. The clips
@@ -649,10 +657,100 @@ def add_audio(
           feature_name=output_feature_name,
           fn_name=f'{output_feature_name}_middle_sample')
 
+  # Apply FFTs to change the sample rate of the waveforms.
+  if preprocessor_builder is not None and target_sample_rate is not None:
+    preprocessor_builder.add_fn(
+        functools.partial(
+            processors.resample_audio,
+            num_subclips=num_test_clips,
+            in_sample_rate=sample_rate,
+            out_sample_rate=target_sample_rate,
+            is_training=is_training),
+        feature_name=builders.AUDIO_FEATURE_NAME)
+
   if num_test_clips > 1 and not is_training:
     # In this case, multiple clips are merged together in batch dimenstion which
     # will be `B * num_test_clips`.
     postprocessor_builder.add_fn(
-        fn=lambda x: tf.reshape(x, (-1, num_samples)),
+        fn=lambda x: tf.reshape(x, (-1, x.shape[-1])),
+        feature_name=output_feature_name,
+        fn_name=f'{output_feature_name}_reshape')
+
+
+def add_spectrogram(
+    preprocessor_builder: builders.PreprocessorBuilder,
+    postprocessor_builder: builders.PostprocessorBuilder,
+    input_feature_name: str = builders.AUDIO_FEATURE_NAME,
+    output_feature_name: str = builders.AUDIO_MEL_FEATURE_NAME,
+    is_training: bool = True,
+    sample_rate: int = 48000,
+    spectrogram_type: str = 'logmf',
+    frame_length: int = 2048,
+    frame_step: int = 1024,
+    num_features: int = 80,
+    lower_edge_hertz: float = 80.0,
+    upper_edge_hertz: float = 7600.0,
+    preemphasis: Optional[float] = None,
+    normalize_audio: bool = False,
+    num_test_clips: int = 1):
+  """Adds functions to process audio spectrogram feature to builders.
+
+  Note that this function does not extract and parse audio feature. Instead it
+  should be used after a `add_audio` function. The output spectrgram is of the
+  shape [batch_size, num_frames, num_features].
+
+  Args:
+    preprocessor_builder: An instance of a `builders.PreprocessorBuilder`.
+    postprocessor_builder: An instance of a `builders.PostprocessorBuilder`.
+    input_feature_name: Name of the feature in the input features dictionary.
+      Exposing this as an argument allows using this function for different
+      audio features.
+    output_feature_name: Name of the feature in the output features dictionary.
+      Exposing this as an argument allows using this function for different
+      audio features.
+    is_training: If the current mode is training or not.
+    sample_rate: The sample rate of the input audio.
+    spectrogram_type: The type of the spectrogram to be extracted from the
+      waveform. Can be either `spectrogram`, `logmf`, and `mfcc`.
+    frame_length: The length of each spectroram frame.
+    frame_step: The stride of spectrogram frames.
+    num_features: The number of spectrogram features.
+    lower_edge_hertz: Lowest frequency to consider.
+    upper_edge_hertz: Highest frequency to consider.
+    preemphasis: The strength of pre-emphasis on the waveform. If None, no
+      pre-emphasis will be applied.
+    normalize_audio: Whether to normalize the waveform or not.
+    num_test_clips: Number of test clips (1 by default). If more than 1, this
+      will sample multiple linearly spaced clips within each audio at test time.
+      If 1, then a single clip in the middle of the audio is sampled. The clips
+      are aggreagated in the batch dimension.
+  """
+  # Validate parameters.
+  if is_training and num_test_clips != 1:
+    logging.info('`num_test_clips` %d is ignored since `is_training` is true.',
+                 num_test_clips)
+
+  # Extract audio spectrograms.
+  preprocessor_builder.add_fn(
+      functools.partial(
+          processors.compute_audio_spectrogram,
+          num_subclips=num_test_clips,
+          sample_rate=sample_rate,
+          spectrogram_type=spectrogram_type,
+          frame_length=frame_length,
+          frame_step=frame_step,
+          num_features=num_features,
+          lower_edge_hertz=lower_edge_hertz,
+          upper_edge_hertz=upper_edge_hertz,
+          normalize=normalize_audio,
+          preemphasis=preemphasis,
+          audio_feature_name=input_feature_name,
+          spectrogram_feature_name=output_feature_name))
+
+  if num_test_clips > 1 and not is_training:
+    # In this case, multiple clips are merged together in batch dimension which
+    # will be `B * num_test_clips`.
+    postprocessor_builder.add_fn(
+        fn=lambda x: tf.reshape(x, (-1, x.shape[-2], x.shape[-1])),
         feature_name=output_feature_name,
         fn_name=f'{output_feature_name}_reshape')
