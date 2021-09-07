@@ -11,11 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Basic constructors for video datasets."""
 
 import abc
-from typing import List, Optional, Type, TypeVar
+from typing import Any, List, Optional, Type, TypeVar
 
 from absl import logging
 from dmvr import builders
@@ -24,6 +23,7 @@ import tensorflow as tf
 
 # Types.
 T = TypeVar('T', bound=builders.BaseParserBuilder)
+NestedStructure = Any
 
 
 class BaseVideoDatasetFactory(abc.ABC):
@@ -292,6 +292,7 @@ class BaseVideoDatasetFactory(abc.ABC):
       num_epochs: Optional[int] = None,
       batch_size: Optional[int] = 16,
       padded_batch: bool = False,
+      padded_batch_shapes: NestedStructure = None,
       drop_remainder: bool = True,
       keep_key: bool = False,
       cache: bool = False,
@@ -311,6 +312,7 @@ class BaseVideoDatasetFactory(abc.ABC):
         Padded batch pads a batch of examples to a given output shape. It pads
         all examples to the longest one in that batch. This could be used for
         sequence data.
+      padded_batch_shapes: `padded_shapes` to be passed to `padded_batch`.
       drop_remainder: Whether to drop any remainder after the last full-size
         batch. If `True`, the batch dimension of the resulting op is known;
         otherwise, the batch dimension may be `None` in cases where `num_epochs`
@@ -332,6 +334,8 @@ class BaseVideoDatasetFactory(abc.ABC):
     Raises:
       ValueError: Factory has not been configured.
       ValueError: `shuffle_buffer` is `None` when dataset is shuffled.
+      ValueError: `batch_size` is not `None`, `padded_batch` is `False` and
+      `padded_batch_shapes` is not `None`.
     """
 
     if not self._is_configured:
@@ -443,8 +447,14 @@ class BaseVideoDatasetFactory(abc.ABC):
     if batch_size is not None:
       if padded_batch:
         ds = ds.padded_batch(
-            batch_size=batch_size, drop_remainder=drop_remainder)
+            batch_size=batch_size,
+            padded_shapes=padded_batch_shapes,
+            drop_remainder=drop_remainder)
       else:
+        if padded_batch_shapes is not None:
+          raise ValueError(
+              '`padded_batch` is `False`, `padded_batch_shapes` must be `None`,'
+              f'but is {padded_batch_shapes}.')
         ds = ds.batch(batch_size, drop_remainder=drop_remainder)
 
     # Postprocess.
