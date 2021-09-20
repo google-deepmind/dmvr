@@ -15,9 +15,10 @@
 """Builders for video datasets."""
 
 import abc
-import collections
 import copy
+import dataclasses
 import enum
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import tensorflow as tf
@@ -305,8 +306,14 @@ RAW_FORMAT_TO_PARSER = {
 }
 
 
-_FunctionDescription = collections.namedtuple(
-    '_FunctionDescription', ('fn_name', 'fn', 'feature_name', 'stateful'))
+@dataclasses.dataclass
+class FunctionDescription:
+  """Function description in DMVR."""
+  fn_name: str
+  fn: Union[Processor, FeatureProcessor, StatefulProcessor,
+            StatefulFeatureProcessor]
+  feature_name: Optional[str]
+  stateful: bool
 
 
 class _Builder(abc.ABC):
@@ -439,7 +446,7 @@ class _Builder(abc.ABC):
     if fn_name in [fd.fn_name for fd in self._fns_list]:
       raise ValueError(f'Given `fn_name` {fn_name} is not unique.')
 
-    new_fd = _FunctionDescription(fn_name, fn, feature_name, stateful)
+    new_fd = FunctionDescription(fn_name, fn, feature_name, stateful)
 
     if add_before_fn_name:
       add_before_idx = [
@@ -496,7 +503,7 @@ class _Builder(abc.ABC):
 
     idx = idx[0]
     fd = self._fns_list[idx]
-    new_fd = _FunctionDescription(fd.fn_name, fn, fd.feature_name, fd.stateful)
+    new_fd = FunctionDescription(fd.fn_name, fn, fd.feature_name, fd.stateful)
     self._fns_list[idx] = new_fd
     return self
 
@@ -515,14 +522,18 @@ class _Builder(abc.ABC):
       for fd in fns_list:
         if fd.feature_name:
           if fd.stateful:
-            output[fd.feature_name] = fd.fn(output[fd.feature_name], state)
+            fn = typing.cast(StatefulFeatureProcessor, fd.fn)
+            output[fd.feature_name] = fn(output[fd.feature_name], state)
           else:
-            output[fd.feature_name] = fd.fn(output[fd.feature_name])
+            fn = typing.cast(FeatureProcessor, fd.fn)
+            output[fd.feature_name] = fn(output[fd.feature_name])
         else:
           if fd.stateful:
-            output = fd.fn(output, state)
+            fn = typing.cast(StatefulProcessor, fd.fn)
+            output = fn(output, state)
           else:
-            output = fd.fn(output)
+            fn = typing.cast(Processor, fd.fn)
+            output = fn(output)
 
       return output
 
