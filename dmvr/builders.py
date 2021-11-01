@@ -663,3 +663,7 @@ class FilterBuilder:
       return keep
 
     return filter_fn
+
+  def get_summary(self):
+    """Returns a summary of the current functions in the builder."""
+    return copy.copy(self._filter_fns)
