@@ -95,20 +95,24 @@ class ModalitiesTest(tf.test.TestCase):
     return output
 
   @parameterized.expand((
-      (True, 1, False, ['image_random_sample'],
-       ['image_resize_smallest', 'image_random_crop', 'image_random_flip',
-        'image_normalize'], []),
-      (False, 1, False, ['image_middle_sample'],
+      (True, 1, False, True, ['image_random_sample'], [
+          'image_resize_smallest', 'image_random_crop', 'image_random_flip',
+          'image_normalize'
+      ], []),
+      (True, 1, False, False, ['image_random_sample'],
+       ['image_resize_smallest', 'image_random_crop', 'image_normalize'], []),
+      (False, 1, False, True, ['image_middle_sample'],
        ['image_resize_smallest', 'image_central_crop', 'image_normalize'], []),
-      (False, 2, False, ['image_linspace_sample'],
-       ['image_resize_smallest', 'image_central_crop', 'image_normalize'],
-       ['image_reshape']),
-      (True, 1, True, ['image_random_sample'],
-       ['image_normalize', 'image_resize_smallest', 'image_random_crop',
-        'image_random_flip', 'image_extract_flow_channels', 'image_clip_flow'],
-       [])))
-  def test_add_image(self, is_training, num_test_clips, is_flow, sample_ops,
-                     preprocess_ops, postprocess_ops):
+      (False, 2, False, True, ['image_linspace_sample'],
+       ['image_resize_smallest', 'image_central_crop',
+        'image_normalize'], ['image_reshape']),
+      (True, 1, True, True, ['image_random_sample'], [
+          'image_normalize', 'image_resize_smallest', 'image_random_crop',
+          'image_random_flip', 'image_extract_flow_channels', 'image_clip_flow'
+      ], []),
+  ))
+  def test_add_image(self, is_training, num_test_clips, is_flow, random_flip,
+                     sample_ops, preprocess_ops, postprocess_ops):
     is_rgb = None if is_flow else True
     zero_centering_image = is_flow
     modalities.add_image(
@@ -128,7 +132,8 @@ class ModalitiesTest(tf.test.TestCase):
         zero_centering_image,  # `zero_centering_image`
         True,  # `sync_random_state`
         is_rgb,  # `is_rgb`
-        is_flow)  # `is_flow`
+        is_flow,  # `is_flow`
+        random_flip)  # `random_flip`
     output = self._process_examples()
 
     self.assertAllEqual(

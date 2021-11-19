@@ -47,7 +47,8 @@ def add_image(
     zero_centering_image: bool = False,
     sync_random_state: bool = True,
     is_rgb: Optional[bool] = True,
-    is_flow: bool = False):
+    is_flow: bool = False,
+    random_flip: bool = True):
   """Adds functions to process image feature to builders.
 
   This function expects the input to be either a `tf.train.SequenceExample` (for
@@ -119,6 +120,9 @@ def add_image(
       processed as such. Note that the number of channels in the JPEG for flow
       is 3, but only two channels will be output corresponding to the valid
       horizontal and vertical displacement.
+    random_flip: If `True`, a random horizontal flip is applied to the input
+      image. This augmentation may not be used if the label set contains
+      direction related classes, such as `pointing left`, `pointing right`, etc.
   """
 
   # Validate parameters.
@@ -216,15 +220,16 @@ def add_image(
         fn_name=f'{output_feature_name}_random_crop',
         # Use state to keep coherence between modalities if requested.
         stateful=sync_random_state)
-    preprocessor_builder.add_fn(
-        # pylint: disable=g-long-lambda
-        fn=lambda x, s=None: processors.random_flip_left_right(
-            x, state=s, is_flow=is_flow),
-        # pylint: enable=g-long-lambda
-        feature_name=output_feature_name,
-        fn_name=f'{output_feature_name}_random_flip',
-        # Use state to keep coherence between modalities if requested.
-        stateful=sync_random_state)
+    if random_flip:
+      preprocessor_builder.add_fn(
+          # pylint: disable=g-long-lambda
+          fn=lambda x, s=None: processors.random_flip_left_right(
+              x, state=s, is_flow=is_flow),
+          # pylint: enable=g-long-lambda
+          feature_name=output_feature_name,
+          fn_name=f'{output_feature_name}_random_flip',
+          # Use state to keep coherence between modalities if requested.
+          stateful=sync_random_state)
   else:
     # Central crop of the frames.
     preprocessor_builder.add_fn(
