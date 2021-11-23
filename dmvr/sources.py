@@ -15,7 +15,7 @@
 """Sources for reading and decoding raw binary data files."""
 
 import abc
-from typing import Union
+from typing import Optional, Union
 
 import tensorflow as tf
 
@@ -52,11 +52,14 @@ class Source(abc.ABC):
 class TFRecordsSource(Source):
   """Source for TFRecords data format."""
 
+  def __init__(self, compression_type: Optional[str] = None):
+    self._compression_type = compression_type
+
   def load_and_decode_shard(
       self,
       shard: Union[str, tf.Tensor]  # Shape () and type `tf.string`.
   ) -> tf.data.Dataset:
-    ds = tf.data.TFRecordDataset(shard)
+    ds = tf.data.TFRecordDataset(shard, compression_type=self._compression_type)
     # TFRecords do not provide an index or key per example. Use shard path as
     # key, since it can be useful later for retrieval.
     key = shard.encode('utf-8') if isinstance(shard, str) else shard
