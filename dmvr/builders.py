@@ -151,7 +151,6 @@ class BaseParserBuilder(abc.ABC):
       The features dictionary obtained from parsing the raw data.
     """
 
-  @abc.abstractmethod
   def get_fake_data(self,
                     default_values: Optional[Dict[str, _DefaultValue]] = None,
                     ) -> FeaturesDict:
@@ -174,6 +173,7 @@ class BaseParserBuilder(abc.ABC):
     Returns:
       The features dictionary obtained from parsing the fake data.
     """
+    raise NotImplementedError('get_fake_data is not implemented!')
 
   def build(self) -> Parser:
     """Builds parse function."""
