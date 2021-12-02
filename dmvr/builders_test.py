@@ -64,6 +64,26 @@ class SequenceExampleParserBuilderTest(tf.test.TestCase):
                         [[0, 0], [1, 0], [1, 1]])
     self.assertAllEqual(features_dict['var_len_seq_name'].dense_shape, [2, 2])
 
+  def test_fake_data(self):
+    parser = builders.SequenceExampleParserBuilder()
+    parser.parse_feature('my_context_feature',
+                         tf.io.FixedLenFeature((2,), dtype=tf.int64),
+                         'context_name', True)
+    parser.parse_feature('my_seq_feature',
+                         tf.io.FixedLenSequenceFeature((2,), dtype=tf.int64),
+                         'seq_name')
+    parser.parse_feature('my_var_len_seq_feature',
+                         tf.io.VarLenFeature(dtype=tf.int64),
+                         'var_len_seq_name')
+    fake_data = parser.get_fake_data(default_values={
+        'context_name': (0, 1), 'var_len_seq_name': (1, 2)})
+    self.assertSetEqual(set(['context_name', 'seq_name', 'var_len_seq_name']),
+                        set(fake_data.keys()))
+    self.assertAllEqual(fake_data['context_name'], [0, 1])
+    self.assertAllEqual(fake_data['seq_name'], [[0, 0]] * 5)
+    self.assertAllEqual(fake_data['var_len_seq_name'].values, [1, 2] * 5)
+    self.assertAllEqual(fake_data['var_len_seq_name'].dense_shape, [5, 2])
+
   def test_no_output_name(self):
     parse_fn = (
         builders.SequenceExampleParserBuilder()
@@ -138,6 +158,22 @@ class ExampleParserBuilderTest(tf.test.TestCase):
     self.assertAllEqual(features_dict['var_name'].values, [2, 3, 4])
     self.assertAllEqual(features_dict['var_name'].indices, [[0], [1], [2]])
     self.assertAllEqual(features_dict['var_name'].dense_shape, [3])
+
+  def test_fake_data(self):
+    fake_data = (
+        builders.ExampleParserBuilder()
+        .parse_feature('my_fixed_len_feature',
+                       tf.io.FixedLenFeature((2,), dtype=tf.string),
+                       'fixed_name')
+        .parse_feature('my_var_len_feature',
+                       tf.io.VarLenFeature(dtype=tf.int64), 'var_name')
+        .get_fake_data(default_values={'fixed_name': (b'42', b'25')}))
+    self.assertSetEqual(set(['fixed_name', 'var_name']),
+                        set(fake_data.keys()))
+    self.assertAllEqual(fake_data['fixed_name'], [b'42', b'25'])
+    self.assertAllEqual(fake_data['var_name'].values, [0])
+    self.assertAllEqual(fake_data['var_name'].indices, [[0]])
+    self.assertAllEqual(fake_data['var_name'].dense_shape, [1])
 
   def test_no_output_name(self):
     parse_fn = (

@@ -19,7 +19,7 @@ import copy
 import dataclasses
 import enum
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import tensorflow as tf
 
@@ -33,6 +33,7 @@ ProcessorState = Dict[str, Any]
 StatefulProcessor = Callable[[FeaturesDict, ProcessorState], FeaturesDict]
 StatefulFeatureProcessor = Callable[[tf.Tensor, ProcessorState], tf.Tensor]
 FilterFn = Callable[[FeaturesDict], tf.Tensor]  # Boolean tensor of shape ().
+_DefaultValue = Union[Tuple[bytes], Tuple[int], Tuple[float]]
 
 # Default name of features for each modality in `FeaturesDict`.
 # User should reference those via variable and not string directly.
@@ -150,9 +151,117 @@ class BaseParserBuilder(abc.ABC):
       The features dictionary obtained from parsing the raw data.
     """
 
+  @abc.abstractmethod
+  def get_fake_data(self,
+                    default_values: Optional[Dict[str, _DefaultValue]] = None,
+                    ) -> FeaturesDict:
+    """Get fake data following the spec of the parser.
+
+    Args:
+      default_values: Allows the user to pass default values to be used to fill
+        the feature dictionary of fake data in lieu of the harcoded default.
+
+    Usage:
+      ```python
+      parser_builder.parse_feature(
+          'image/encoded',
+          tf.io.FixedLenSequenceFeature((), dtype=tf.string),
+          IMAGE_FEATURE_NAME)
+      fake_data = parser_builder.get_fake_data(
+          default_values={IMAGE_FEATURE_NAME: (b'a jpeg string',)})
+      )
+      ```
+    Returns:
+      The features dictionary obtained from parsing the fake data.
+    """
+
   def build(self) -> Parser:
     """Builds parse function."""
     return self._parse_fn
+
+
+def get_default_value(feature_name: str,
+                      default_values: Dict[str, _DefaultValue],
+                      output_names: Sequence[str],
+                      expected_len: Optional[int]) -> Optional[_DefaultValue]:
+  """Get a default value for ParserBuilders."""
+  output_values = [default_values.get(n) for n in output_names]
+  output_values = list(set(filter(lambda x: x is not None, output_values)))
+  if len(output_values) > 1:
+    raise ValueError(
+        f'Different default values (={output_values}) were assigned'
+        f' to the same underlying input name (={feature_name})!')
+  if output_values:
+    output_value = output_values[0]
+    if expected_len:
+      if len(output_value) != expected_len:
+        raise ValueError(
+            f'The expected shape ([{expected_len}] is different from the '
+            f'provided one ([{len(output_value)}]))')
+    return output_values[0]
+  else:
+    return None
+
+
+def _get_feature(
+    feature_name: str,
+    feature_type: Union[tf.io.VarLenFeature,
+                        tf.io.FixedLenFeature,
+                        tf.io.FixedLenSequenceFeature],
+    default_values: Dict[str, _DefaultValue],
+    output_names: Sequence[str],
+    default_int: int = 0,
+    default_float: float = 42.0,
+    default_bytes: bytes = b'lorem ipsum',
+    ) -> tf.train.Feature:
+  """Get default tf.train.Feature."""
+  if isinstance(feature_type, tf.io.VarLenFeature):
+    shape = [1]
+    expected_len = None  # The len of the default_values can be arbitrary.
+  elif (isinstance(feature_type, tf.io.FixedLenFeature) or
+        isinstance(feature_type, tf.io.FixedLenSequenceFeature)):
+    shape = feature_type.shape
+    shape = shape if len(shape) == 1 else [1]
+    if len(shape) > 1:
+      raise ValueError(
+          f'Shape must be of length 1 but shape={shape} was provided!')
+    expected_len = shape[0]
+  else:
+    raise ValueError(f'feature_type={feature_type} is not supported!')
+
+  value = get_default_value(
+      feature_name, default_values, output_names, expected_len)
+  if feature_type.dtype == tf.string:
+    if value is None:
+      value = [default_bytes] * shape[0]
+    assert isinstance(value[0], bytes)
+    output = tf.train.Feature(bytes_list=tf.train.BytesList(value=value))
+  elif feature_type.dtype in (tf.bool, tf.int32, tf.int64):
+    if value is None:
+      value = [default_int] * shape[0]
+    assert isinstance(value[0], int)
+    output = tf.train.Feature(int64_list=tf.train.Int64List(value=value))
+  elif feature_type.dtype in (tf.float32, tf.float64):
+    if value is None:
+      value = [default_float] * shape[0]
+    assert isinstance(value[0], float)
+    output = tf.train.Feature(float_list=tf.train.FloatList(value=value))
+  else:
+    raise ValueError(f'dtype {feature_type.dtype} is not supported!')
+  return output
+
+
+def _get_feature_list(
+    feature_name: str,
+    feature_type: Union[tf.io.VarLenFeature, tf.io.FixedLenSequenceFeature],
+    default_values: Dict[str, _DefaultValue],
+    output_names: Sequence[str],
+    feature_list_len: int = 5,
+    ) -> tf.train.FeatureList:
+  """Get default tf.train.FeatureList."""
+  feature = _get_feature(
+      feature_name, feature_type, default_values, output_names)
+  return tf.train.FeatureList(feature=[feature] * feature_list_len)
 
 
 class SequenceExampleParserBuilder(BaseParserBuilder):
@@ -214,6 +323,28 @@ class SequenceExampleParserBuilder(BaseParserBuilder):
     self._name_dict[(feature_name, is_context)].append(output_name)
 
     return self
+
+  def get_fake_data(self,
+                    default_values: Optional[Dict[str, _DefaultValue]] = None,
+                    ) -> FeaturesDict:
+    default_values = default_values or {}
+    # Get tf.SequenceExample proto from the parser spec, then parse it.
+    feature = {}
+    feature_list = {}
+    for (feat_name, is_context), out_names in self._name_dict.items():
+      feat_type = self._features[(feat_name, is_context)]
+      if is_context:
+        feature[feat_name] = _get_feature(
+            feat_name, feat_type, default_values, out_names)
+      else:
+        feature_list[feat_name] = _get_feature_list(
+            feat_name, feat_type, default_values, out_names)
+
+    context = tf.train.Features(feature=feature)
+    feature_lists = tf.train.FeatureLists(feature_list=feature_list)
+    tf_proto = tf.constant(tf.train.SequenceExample(
+        context=context, feature_lists=feature_lists).SerializeToString())
+    return self._parse_fn(tf_proto)
 
   def _parse_fn(self, raw_data: tf.Tensor) -> FeaturesDict:
     """Converts bytes of `tf.train.SequenceExample` to a features dictionary."""
@@ -284,6 +415,22 @@ class ExampleParserBuilder(BaseParserBuilder):
     self._name_dict[feature_name].append(output_name)
 
     return self
+
+  def get_fake_data(self,
+                    default_values: Optional[Dict[str, _DefaultValue]] = None,
+                    ) -> FeaturesDict:
+    """Generate a fake example following the spec of the ParserBuilder."""
+
+    default_values = default_values or {}
+    # Get a tf.Example proto following the spec of the parser, then parse it.
+    feature_dict = {}
+    for feat_name, out_names in self._name_dict.items():
+      feat_type = self._features[feat_name]
+      feature_dict[feat_name] = _get_feature(
+          feat_name, feat_type, default_values, out_names)
+    tf_proto = tf.constant(tf.train.Example(
+        features=tf.train.Features(feature=feature_dict)).SerializeToString())
+    return self._parse_fn(tf_proto)
 
   def _parse_fn(self, raw_data: tf.Tensor) -> FeaturesDict:
     """Converts bytes of raw Example to a features dictionary."""
