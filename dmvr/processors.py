@@ -215,7 +215,8 @@ def sample_or_pad_non_sorted_sequence(
     pad_value: Any,
     random: bool,
     seed: Optional[int] = None,
-    state: Optional[builders.ProcessorState] = None) -> tf.Tensor:
+    state: Optional[builders.ProcessorState] = None,
+    state_key: str = 'sample_sequence_random_perm') -> tf.Tensor:
   """Samples or pads (with `pad_value`) elements from the input sequence.
 
   The input sequence can be multidimensional, but the sampling or pads will
@@ -231,11 +232,12 @@ def sample_or_pad_non_sorted_sequence(
       `max(max_num_steps, sequence_length)` elements are taken.
     seed: A deterministic seed to use when sampling.
     state:  A mutable dictionary where keys are strings. The dictionary might
-      contain 'sample_sequence_random_perm' as key with metadata useful for
+      contain an entry with `state_key` as key with metadata useful for
       sampling. It will be modified with added metadata if needed. This can be
       used to keep consistency between sampling of different sequences. Note
       that a runtime error will be raised in case state is provided but the
       sequences that one tries to sync are of different lenghts.
+    state_key: Name of the state entry that controls the random sampling.
 
   Returns:
     A single tensor with first dimension `max_num_steps` with the sampled
@@ -247,10 +249,10 @@ def sample_or_pad_non_sorted_sequence(
   """
   sequence_length = tf.shape(input=sequence)[0]
   if random:
-    if state and 'sample_sequence_random_perm' in state:
+    if state and state_key in state:
       # Read offset from state to ensure consistent offsets for different
       # modalities.
-      random_perm = state['sample_sequence_random_perm']
+      random_perm = state[state_key]
       tf.debugging.assert_equal(
           sequence_length, tf.shape(input=random_perm)[0],
           ('Trying to sync the sampling of two sequences that do not have the '
@@ -258,7 +260,7 @@ def sample_or_pad_non_sorted_sequence(
     else:
       random_perm = tf.argsort(tf.random.uniform((sequence_length,), seed=seed))
       if state is not None:
-        state['sample_sequence_random_perm'] = random_perm
+        state[state_key] = random_perm
     sequence = tf.gather(sequence, random_perm)
 
   padding_pattern = [[0, tf.maximum(0, max_num_steps - sequence_length)],]
