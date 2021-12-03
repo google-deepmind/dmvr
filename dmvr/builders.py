@@ -33,7 +33,11 @@ ProcessorState = Dict[str, Any]
 StatefulProcessor = Callable[[FeaturesDict, ProcessorState], FeaturesDict]
 StatefulFeatureProcessor = Callable[[tf.Tensor, ProcessorState], tf.Tensor]
 FilterFn = Callable[[FeaturesDict], tf.Tensor]  # Boolean tensor of shape ().
-_DefaultValue = Union[Tuple[bytes], Tuple[int], Tuple[float]]
+_DefaultSingleValue = Union[Tuple[bytes], Tuple[int], Tuple[float]]
+_DefaultSequenceValue = Union[Tuple[Tuple[bytes]], Tuple[Tuple[int]],
+                              Tuple[Tuple[float]]]
+_DefaultValue = Union[_DefaultSingleValue, _DefaultSequenceValue]
+_DefaultValues = Dict[str, Union[_DefaultValue, _DefaultSequenceValue]]
 
 # Default name of features for each modality in `FeaturesDict`.
 # User should reference those via variable and not string directly.
@@ -152,7 +156,7 @@ class BaseParserBuilder(abc.ABC):
     """
 
   def get_fake_data(self,
-                    default_values: Optional[Dict[str, _DefaultValue]] = None,
+                    default_values: Optional[_DefaultValues] = None,
                     ) -> FeaturesDict:
     """Get fake data following the spec of the parser.
 
@@ -181,26 +185,85 @@ class BaseParserBuilder(abc.ABC):
 
 
 def get_default_value(feature_name: str,
-                      default_values: Dict[str, _DefaultValue],
+                      default_values: _DefaultValues,
                       output_names: Sequence[str],
-                      expected_len: Optional[int]) -> Optional[_DefaultValue]:
-  """Get a default value for ParserBuilders."""
+                      expected_len: Optional[int],
+                      list_of_list: bool = False) -> Optional[_DefaultValue]:
+  """Get a default value list for ParserBuilders.
+
+  Args:
+    feature_name: The input feature name for which we want to provide default
+      value for.
+    default_values: A dict containing the default value. For convenience as we
+      dont have a control on the input feature_name which might depend on how
+      the data is stored, the key of the dict have to be the ones corresponding
+      to the output_names. Values of the dict can either be a tuple of
+      float/int/bytes (list_of_list=False) or a tuple of tuples of
+      float/int/bytes (list_of_list=True).
+    output_names: The output names used for feature_name. Note that the same
+      feature_name can be used for multiple output, hence why output_names is a
+      Sequence. If the user provide default_value for multiple of these
+      output_names, they have to all match.
+    expected_len: If provided, will check that the default value has the correct
+      length.
+    list_of_list: Whether or not we provide default value for single example
+      (a tuple is expected) or a default value for a sequence example that can
+      accomodate list of list.
+
+  Returns:
+    The default_value if it exists in default_values or None instead.
+
+  Raises:
+    ValueError if different default_value are provided for the output_names.
+    ValueError if the provided default value does not have the expected len.
+
+  Note: The reason why the default_value should be tuples instead of lists
+    is that we can verify their uniqueness (as tuple are hashable objects
+    whereas list are not).
+  """
+
   output_values = [default_values.get(n) for n in output_names]
   output_values = list(set(filter(lambda x: x is not None, output_values)))
+  if not output_values:
+    # Case where no entries in default_values matched the provided output_names
+    return None
+
+  # output_values contain all the default_values given for output_names.
+  # Since all names in output_names correspond to the same feature_name we need
+  # to ensure that there is at most a single one entry in the set.
   if len(output_values) > 1:
     raise ValueError(
         f'Different default values (={output_values}) were assigned'
         f' to the same underlying input name (={feature_name})!')
-  if output_values:
-    output_value = output_values[0]
-    if expected_len:
-      if len(output_value) != expected_len:
-        raise ValueError(
-            f'The expected shape ([{expected_len}] is different from the '
-            f'provided one ([{len(output_value)}]))')
-    return output_values[0]
-  else:
-    return None
+
+  # We ensure there was a unique default_value provided which corresponds to
+  # the first entry of the set.
+  output_value = output_values[0]
+
+  # At this stage output_value can be:
+  #  - If list_of_list:
+  #       * a) A tuple of tuples of bytes/int/float.
+  #       * b) A tuple of bytes/int/float. In that case we will transform to a
+  #         tuple of tuple: (output_value,) to match the expected format.
+  #  - if not list_of_list:
+  #       * c) A tuple of bytes/int/float.
+  if list_of_list and isinstance(output_value[0], (bytes, int, float)):
+    # Case b) => we transform to tuple of tuples.
+    assert all([isinstance(x, (bytes, int, float)) for x in output_value])
+    # The next conversion is used to make sure pytype recognize the type.
+    output_value = (
+        tuple([x for x in output_value if isinstance(x, (bytes, str, float))]),
+        )
+
+  # If expected_len is provided, we verify that the length of the inner tuple of
+  # bytes/int/float is as expected.
+  if expected_len:
+    actual_length = len(output_value[0]) if list_of_list else len(output_value)
+    if actual_length != expected_len:
+      raise ValueError(
+          f'The expected len(={expected_len}) for {feature_name} is different'
+          f' from the provided one (={actual_length}).')
+  return output_value
 
 
 def _get_feature(
@@ -208,7 +271,7 @@ def _get_feature(
     feature_type: Union[tf.io.VarLenFeature,
                         tf.io.FixedLenFeature,
                         tf.io.FixedLenSequenceFeature],
-    default_values: Dict[str, _DefaultValue],
+    default_values: _DefaultValues,
     output_names: Sequence[str],
     default_int: int = 0,
     default_float: float = 42.0,
@@ -254,14 +317,51 @@ def _get_feature(
 def _get_feature_list(
     feature_name: str,
     feature_type: Union[tf.io.VarLenFeature, tf.io.FixedLenSequenceFeature],
-    default_values: Dict[str, _DefaultValue],
+    default_values: _DefaultValues,
     output_names: Sequence[str],
-    feature_list_len: int = 5,
+    default_feature_list_len: int = 1,
     ) -> tf.train.FeatureList:
   """Get default tf.train.FeatureList."""
-  feature = _get_feature(
-      feature_name, feature_type, default_values, output_names)
-  return tf.train.FeatureList(feature=[feature] * feature_list_len)
+
+  if isinstance(feature_type, tf.io.VarLenFeature):
+    expected_len = None
+  elif isinstance(feature_type, tf.io.FixedLenSequenceFeature):
+    shape = feature_type.shape
+    if len(shape) > 1:
+      raise ValueError(
+          f'Shape must be of length 1 but shape={shape} was provided!')
+    expected_len = shape[0] if len(shape) == 1 else 1
+  value_list = get_default_value(feature_name, default_values, output_names,
+                                 expected_len, list_of_list=True)
+
+  # If not in the default_values, we fallback to single value that we repeat
+  # default_feature_list_len times.
+  if value_list is None:
+    feature = _get_feature(feature_name, feature_type, dict(), output_names)
+    feature_list = tf.train.FeatureList(
+        feature=[feature] * default_feature_list_len)
+  else:
+    features = []
+    if isinstance(value_list[0][0], bytes):
+      for val in value_list:
+        assert all([isinstance(x, bytes) for x in val])
+        features.append(
+            tf.train.Feature(bytes_list=tf.train.BytesList(value=val)))
+    elif isinstance(value_list[0][0], float):
+      for val in value_list:
+        assert all([isinstance(x, float) for x in val])
+        features.append(
+            tf.train.Feature(float_list=tf.train.FloatList(value=val)))
+    elif isinstance(value_list[0][0], int):
+      for val in value_list:
+        assert all([isinstance(x, int) for x in val])
+        features.append(
+            tf.train.Feature(int64_list=tf.train.Int64List(value=val)))
+    else:
+      raise ValueError(f'value_list (={value_list}) given for {feature_name} '
+                       'has to be of bytes/float/int')
+    feature_list = tf.train.FeatureList(feature=features)
+  return feature_list
 
 
 class SequenceExampleParserBuilder(BaseParserBuilder):
@@ -325,7 +425,7 @@ class SequenceExampleParserBuilder(BaseParserBuilder):
     return self
 
   def get_fake_data(self,
-                    default_values: Optional[Dict[str, _DefaultValue]] = None,
+                    default_values: Optional[_DefaultValues] = None,
                     ) -> FeaturesDict:
     default_values = default_values or {}
     # Get tf.SequenceExample proto from the parser spec, then parse it.
@@ -417,7 +517,7 @@ class ExampleParserBuilder(BaseParserBuilder):
     return self
 
   def get_fake_data(self,
-                    default_values: Optional[Dict[str, _DefaultValue]] = None,
+                    default_values: Optional[_DefaultValues] = None,
                     ) -> FeaturesDict:
     """Generate a fake example following the spec of the ParserBuilder."""
 

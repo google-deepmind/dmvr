@@ -76,13 +76,13 @@ class SequenceExampleParserBuilderTest(tf.test.TestCase):
                          tf.io.VarLenFeature(dtype=tf.int64),
                          'var_len_seq_name')
     fake_data = parser.get_fake_data(default_values={
-        'context_name': (0, 1), 'var_len_seq_name': (1, 2)})
+        'context_name': (0, 1), 'var_len_seq_name': ((1, 2), (3, 4, 5))})
     self.assertSetEqual(set(['context_name', 'seq_name', 'var_len_seq_name']),
                         set(fake_data.keys()))
     self.assertAllEqual(fake_data['context_name'], [0, 1])
-    self.assertAllEqual(fake_data['seq_name'], [[0, 0]] * 5)
-    self.assertAllEqual(fake_data['var_len_seq_name'].values, [1, 2] * 5)
-    self.assertAllEqual(fake_data['var_len_seq_name'].dense_shape, [5, 2])
+    self.assertAllEqual(fake_data['seq_name'], [[0, 0]])
+    self.assertAllEqual(fake_data['var_len_seq_name'].values, [1, 2, 3, 4, 5])
+    self.assertAllEqual(fake_data['var_len_seq_name'].dense_shape, [2, 3])
 
   def test_no_output_name(self):
     parse_fn = (
