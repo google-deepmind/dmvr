@@ -42,13 +42,10 @@ def _get_random_sampling_offset(sequence: tf.Tensor,
     The first index to begin sampling from. A best effort is made to provide a
     starting index such that all requested steps fit within the sequence (i.e.
     `offset + 1 + (num_steps - 1) * stride` < len(sequence)`). If this is not
-    satisfied, the starting index is chosen randomly from the full sequence.
+    satisfied, the starting index is always 0.
   """
   sequence_length = tf.shape(input=sequence)[0]
-  max_offset = tf.cond(
-      pred=tf.greater(sequence_length, (num_steps - 1) * stride),
-      true_fn=lambda: sequence_length - (num_steps - 1) * stride,
-      false_fn=lambda: sequence_length)
+  max_offset = tf.maximum(sequence_length - (num_steps - 1) * stride, 1)
   return tf.random.uniform((),
                            maxval=tf.cast(max_offset, dtype=tf.int32),
                            dtype=tf.int32,

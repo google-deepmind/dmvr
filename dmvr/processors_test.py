@@ -17,6 +17,7 @@
 import itertools
 import os
 
+from absl.testing import parameterized
 from dmvr import processors
 from dmvr import tokenizers
 import numpy as np
@@ -29,7 +30,7 @@ _SAMPLE_IMAGE_PATH = os.path.join(_TESTDATA_DIR, 'sample.jpeg')
 _VOCAB_PATH = os.path.join(_TESTDATA_DIR, 'tokenizers', 'word_vocab.txt')
 
 
-class SampleTest(tf.test.TestCase):
+class SampleTest(tf.test.TestCase, parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -102,6 +103,45 @@ class SampleTest(tf.test.TestCase):
     sampled_seq_2 = processors.sample_or_pad_non_sorted_sequence(
         multi_dim_sequence, 10, 0, True, state=state)
     self.assertAllEqual(sampled_seq_1, sampled_seq_2[:, 0])
+
+  @parameterized.named_parameters(
+      {
+          'testcase_name': 'len(seq) < num_steps',
+          'sequence': np.array([1, 2, 3]),
+          'num_steps': 5,
+          'expected_sequence': np.array([1, 2, 3, 1, 2])
+      },
+      {
+          'testcase_name': 'len(seq) == num_steps',
+          'sequence': np.array([1, 2, 3]),
+          'num_steps': 3,
+          'expected_sequence': np.array([1, 2, 3])
+      },
+      {
+          'testcase_name': 'len(seq) < num_steps with stride',
+          'sequence': np.array([1, 2, 3]),
+          'num_steps': 5,
+          'expected_sequence': np.array([1, 3, 2, 1, 3]),
+          'stride': 2
+      },
+      {
+          'testcase_name': 'len(seq) == num_steps with stride',
+          'sequence': np.array([1, 2, 3]),
+          'num_steps': 3,
+          'expected_sequence': np.array([1, 1, 1]),
+          'stride': 3
+      },
+  )
+  def test_sample_sequence_fixed_offset(self,
+                                        sequence: np.ndarray,
+                                        num_steps: int,
+                                        expected_sequence: np.ndarray,
+                                        stride: int = 1):
+    """Tests that offset is always 0."""
+    for seed in range(5):
+      actual_sequence = processors.sample_sequence(
+          sequence, num_steps=num_steps, random=True, stride=stride, seed=seed)
+      np.testing.assert_array_equal(actual_sequence, expected_sequence)
 
 
 class DecodeTest(tf.test.TestCase):
