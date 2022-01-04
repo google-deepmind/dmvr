@@ -263,7 +263,7 @@ def sample_or_pad_non_sorted_sequence(
   padding_pattern = [[0, tf.maximum(0, max_num_steps - sequence_length)],]
   num_dim = len(tf.shape(input=sequence))
   if num_dim > 1:
-    padding_pattern.append([0, 0] * (num_dim - 1))
+    padding_pattern.extend([[0, 0]] * (num_dim - 1))
   return tf.pad(
       tensor=sequence[:max_num_steps],
       paddings=padding_pattern,
