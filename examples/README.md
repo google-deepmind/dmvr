@@ -1,7 +1,7 @@
 # End-to-end walktrough: from raw data to using the readers for learning
 
-This document walks you through all the steps that go from raw data (a list of 
-mp4 files), to a format that is compatible with DMVR, to writing a reader to 
+This document walks you through all the steps that go from raw data (a list of
+mp4 files), to a format that is compatible with DMVR, to writing a reader to
 finally use it in an ML application.
 
 
@@ -26,7 +26,7 @@ ffmpeg-python which is different). Installing python-ffmpeg with pip can be done
 in one line with:
 
 ```sh
-pip install python-ffmpeg
+pip install ffmpeg-python
 ```
 
 ## Creating and reading your own DMVR dataset using open-source tools
@@ -192,7 +192,7 @@ To run the script simply do:
 python linear_mmv_hmdb.py \
   --data_path=/path/to/hmdb_shards \
   --model_name=s3d \
-  --split=1
+  --hmdb51_split=1
 ```
 
 It supports three different models and the script should reproduce

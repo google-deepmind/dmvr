@@ -132,7 +132,7 @@ def generate_sequence_example(video_path: str,
   """Generate a sequence example."""
   if FLAGS.video_root_path:
     video_path = os.path.join(FLAGS.video_root_path, video_path)
-  img_encoded = extract_frames(video_path, start, end)
+  imgs_encoded = extract_frames(video_path, start, end)
 
   # Initiate the sequence example.
   seq_example = tf.train.SequenceExample()
@@ -143,8 +143,9 @@ def generate_sequence_example(video_path: str,
     set_context_bytes("clip/label/text", label_name.encode(), seq_example)
   if caption:
     set_context_bytes("caption/string", caption.encode(), seq_example)
-  # Add the frames.
-  add_bytes_list("image/encoded", img_encoded, seq_example)
+  # Add the frames as one feature per frame.
+  for img_encoded in imgs_encoded:
+    add_bytes_list("image/encoded", [img_encoded], seq_example)
 
   # Add audio.
   if FLAGS.decode_audio:

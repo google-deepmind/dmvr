@@ -27,7 +27,7 @@ class HMDB51Factory(video_dataset.BaseVideoDatasetFactory):
   _SPLITS = (1, 2, 3)
   _NUM_CLASSES = 51
 
-  _NUM_SHARDS = {'train': 60, 'test': 40}
+  _NUM_SHARDS = {'train': 59, 'test': 39}
 
   def __init__(
       self,
@@ -45,7 +45,7 @@ class HMDB51Factory(video_dataset.BaseVideoDatasetFactory):
                        .format(split, HMDB51Factory._SPLITS))
 
     num_shards = self._NUM_SHARDS[subset]
-    shards = [f'hmdb51_{subset}_{split}-{i:05d}-of-{num_shards:05d}'
+    shards = [f'{subset}_{split}-{i:05d}-of-{num_shards:05d}'
               for i in range(num_shards)]
     super().__init__(shards=[os.path.join(base_dir, s) for s in shards])
 
