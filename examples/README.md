@@ -15,7 +15,7 @@ To run the code, you will need to install the following dependencies:
 -   pandas
 -   Tensorflow
 -   [ffmpeg](https://johnvansickle.com/ffmpeg/)
--   [python-ffmpeg](https://github.com/kkroening/ffmpeg-python)
+-   [ffmpeg-python](https://github.com/kkroening/ffmpeg-python) [Make sure you pip install ffmpeg-python and not python-ffmpeg]
 -   unrar [Only for the HMDB-51 dataset generation example]
 -   [scikit-learn](https://scikit-learn.org/) [Only for training linear model on HMDB]
 

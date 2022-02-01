@@ -17,7 +17,7 @@
 from absl import app
 from absl import flags
 from dmvr import builders
-from dmvr.examples import hmdb
+import hmdb
 import numpy as np
 from sklearn import preprocessing
 from sklearn import svm

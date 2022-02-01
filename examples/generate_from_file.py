@@ -16,7 +16,7 @@
 import contextlib
 import math
 import os
-from typing import Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 from absl import app
 from absl import flags
@@ -128,7 +128,7 @@ def generate_sequence_example(video_path: str,
                               end: float,
                               label_name: Optional[str] = None,
                               caption: Optional[str] = None,
-                              label_map: Optional[dict[str, int]] = None):
+                              label_map: Optional[Dict[str, int]] = None):
   """Generate a sequence example."""
   if FLAGS.video_root_path:
     video_path = os.path.join(FLAGS.video_root_path, video_path)
