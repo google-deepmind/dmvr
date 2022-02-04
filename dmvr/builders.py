@@ -284,6 +284,8 @@ def _get_feature(
   elif (isinstance(feature_type, tf.io.FixedLenFeature) or
         isinstance(feature_type, tf.io.FixedLenSequenceFeature)):
     shape = feature_type.shape
+    if isinstance(shape, int):
+      shape = [shape]
     shape = shape if len(shape) == 1 else [1]
     if len(shape) > 1:
       raise ValueError(
@@ -327,6 +329,8 @@ def _get_feature_list(
     expected_len = None
   elif isinstance(feature_type, tf.io.FixedLenSequenceFeature):
     shape = feature_type.shape
+    if isinstance(shape, int):
+      shape = [shape]
     if len(shape) > 1:
       raise ValueError(
           f'Shape must be of length 1 but shape={shape} was provided!')
