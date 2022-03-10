@@ -185,6 +185,7 @@ class BaseVideoDatasetFactory(abc.ABC):
     self._num_parallel_calls_interleave = tf.data.experimental.AUTOTUNE
     self._block_length = None
     self._seed = None
+    self._duplicate_proto = None
 
     self._is_configured = False
 
@@ -223,7 +224,8 @@ class BaseVideoDatasetFactory(abc.ABC):
            cycle_length: Optional[int] = None,
            num_parallel_calls_interleave: Optional[int] = None,
            block_length: Optional[int] = None,
-           seed: Optional[int] = None):
+           seed: Optional[int] = None,
+           duplicate_proto: Optional[int] = None):
     """Changes the dataset creation parameters.
 
     This method should be used to change the default parameters used to create
@@ -252,6 +254,11 @@ class BaseVideoDatasetFactory(abc.ABC):
       block_length: The number of consecutive elements to produce from each
         shard.
       seed: Random seed of the shuffle operations.
+      duplicate_proto: Number of duplicates to make for each loaded proto.
+        Typically different augmentations will be applied for each copy, so
+        this can reduce disk reads without harming training performance.
+        This is applied after the post read function, but before the shuffle
+        buffer.
 
     Returns:
       This instance of the factory.
@@ -271,6 +278,7 @@ class BaseVideoDatasetFactory(abc.ABC):
         num_parallel_calls_interleave or self._num_parallel_calls_interleave)
     self._block_length = block_length or self._block_length
     self._seed = seed or self._seed
+    self._duplicate_proto = duplicate_proto or self._duplicate_proto
 
     return self
 
@@ -388,6 +396,15 @@ class BaseVideoDatasetFactory(abc.ABC):
     # create one with the key only to make the interface uniform.
     ds = ds.filter(
         lambda key, _: filter_fn_post_read({builders.KEY_FEATURE_NAME: key}))
+
+    if self._duplicate_proto is not None:
+
+      def duplicate_fn(x, y):
+        return (tf.stack([x] * self._duplicate_proto),
+                tf.stack([y] * self._duplicate_proto))
+
+      ds = ds.map(duplicate_fn)
+      ds = ds.unbatch()
 
     if not cache:
       ds = ds.repeat(num_epochs)
