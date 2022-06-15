@@ -696,7 +696,7 @@ def tokenize(features: builders.FeaturesDict,
   Args:
     features: A dictionary of features.
     tokenizer: An instance of a text tokenizer.
-    raw_string_name: The name of the raw sring feature in features.
+    raw_string_name: The name of the raw string feature in features.
     tokenized_name: The name of the desired tokenized feature in the output.
     prepend_bos: Whether or not to prepend BOS in the tokenizer.
     append_eos: Whether or not to append EOS in the tokenizer.
