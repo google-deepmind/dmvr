@@ -462,13 +462,15 @@ class ClipTokenizer(TextTokenizer):
 
   def __init__(
       self,
-      vocabulary_path: str = simple_tokenizer.default_bpe(),
+      vocabulary_path: Optional[str] = None,
   ) -> None:
     """Initializes the `ClipTokenizer`.
 
     Args:
       vocabulary_path: A path to a CLIP-style vocabulary file.
     """
+    vocabulary_path = vocabulary_path or simple_tokenizer.default_bpe()
+
     # Create TF tokenizer similar to google3/robotics/learning/clip/clip.py,
     # which in turn is similar to
     # https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py
