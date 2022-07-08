@@ -373,7 +373,8 @@ def crop_image(frames: tf.Tensor,
 
 def resize_smallest(frames: tf.Tensor,
                     min_resize: int,
-                    is_flow: bool = False) -> tf.Tensor:
+                    is_flow: bool = False,
+                    method: str = tf.image.ResizeMethod.BILINEAR) -> tf.Tensor:
   """Resizes frames so that `min(height, width)` is equal to `min_resize`.
 
   This function will do nothing if the `min(height, width)` is already equal to
@@ -387,6 +388,7 @@ def resize_smallest(frames: tf.Tensor,
       multiply the flow values by the same factor k since one pixel displacement
       in the resized image corresponds to only 1/k pixel displacement in the
       original image.
+    method: A resizing method.
 
   Returns:
     A tensor of shape [timesteps, output_h, output_w, channels] of same type as
@@ -403,7 +405,7 @@ def resize_smallest(frames: tf.Tensor,
 
   def resize_fn():
     frames_resized = tf.image.resize(
-        frames, (output_h, output_w), method=tf.image.ResizeMethod.BILINEAR)
+        frames, (output_h, output_w), method=method)
     return tf.cast(frames_resized, frames.dtype)
 
   should_resize = tf.math.logical_or(tf.not_equal(input_w, output_w),
@@ -484,13 +486,16 @@ def normalize_image(frames: tf.Tensor,
   return frames
 
 
-def scale_jitter_augm(frames: tf.Tensor,
-                      min_scale_factor: float = 0.8,
-                      max_scale_factor: float = 1.2,
-                      prob: float = 0.8,
-                      seed: Optional[int] = None,
-                      state: Optional[builders.ProcessorState] = None,
-                      is_flow: bool = False) -> tf.Tensor:
+def scale_jitter_augm(
+    frames: tf.Tensor,
+    min_scale_factor: float = 0.8,
+    max_scale_factor: float = 1.2,
+    prob: float = 0.8,
+    seed: Optional[int] = None,
+    state: Optional[builders.ProcessorState] = None,
+    is_flow: bool = False,
+    method: str = tf.image.ResizeMethod.BILINEAR,
+) -> tf.Tensor:
   """Applies scale jitter to videos with probability `prob`.
 
   In details this will independently sample a factor along the height and the
@@ -512,6 +517,7 @@ def scale_jitter_augm(frames: tf.Tensor,
       multiply the flow values by the same factor k since one pixel displacement
       in the resized image corresponds to only 1/k pixel displacement in the
       original image.
+    method: A resizing method.
 
   Returns:
     A tensor of shape [timesteps, output_h, output_w, channels] which spatial
@@ -531,8 +537,7 @@ def scale_jitter_augm(frames: tf.Tensor,
         w_scale * tf.cast(input_width, tf.float32), tf.int32)
     resize_shape = tf.stack([rdm_resize_height, rdm_resize_width])
     frames = tf.cast(
-        tf.image.resize(
-            frames, resize_shape, method=tf.image.ResizeMethod.BILINEAR),
+        tf.image.resize(frames, resize_shape, method=method),
         frames.dtype)
     if is_flow:
       channel_mult = tf.stack([h_scale, w_scale, 1.0])[None, None, None, :]
@@ -698,11 +703,11 @@ def tokenize(features: builders.FeaturesDict,
     tokenizer: An instance of a text tokenizer.
     raw_string_name: The name of the raw string feature in features.
     tokenized_name: The name of the desired tokenized feature in the output.
-    prepend_bos: Whether or not to prepend BOS in the tokenizer.
-    append_eos: Whether or not to append EOS in the tokenizer.
+    prepend_bos: Whether to prepend BOS in the tokenizer.
+    append_eos: Whether to append EOS in the tokenizer.
     max_num_tokens: Number of tokens in final result. The tokenized sentence
-      will be either crop or padded using the tokenizer pad id.
-    keep_raw_string: Whether or not to keep the raw string in the output.
+      will be either crop or padded using the tokenizer pad token ID.
+    keep_raw_string: Whether to keep the raw string in the output.
 
   Returns:
     A FeaturesDict containing the tokenized string.
