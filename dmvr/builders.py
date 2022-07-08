@@ -338,7 +338,7 @@ def _get_feature_list(
   value_list = get_default_value(feature_name, default_values, output_names,
                                  expected_len, list_of_list=True)
 
-  # If not in the default_values, we fallback to single value that we repeat
+  # If not in the default_values, we fall back to single value that we repeat
   # default_feature_list_len times.
   if value_list is None:
     feature = _get_feature(feature_name, feature_type, dict(), output_names)
@@ -389,7 +389,7 @@ class SequenceExampleParserBuilder(BaseParserBuilder):
 
     The same input feature can be added more than once with different
     `output_name` but always with the same `feature_type`. This is useful when
-    multiple views (with different processings down the line) of the same data
+    multiple views (with different processing down the line) of the same data
     is needed.
 
     Args:

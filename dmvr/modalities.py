@@ -16,6 +16,7 @@
 
 import functools
 from typing import Optional
+from typing import Union
 
 from absl import logging
 from dmvr import builders
@@ -48,7 +49,10 @@ def add_image(
     sync_random_state: bool = True,
     is_rgb: Optional[bool] = True,
     is_flow: bool = False,
-    random_flip: bool = True):
+    random_flip: bool = True,
+    normalization_mean: Union[tf.Tensor, float] = 0,
+    normalization_std: Union[tf.Tensor, float] = 1,
+) -> None:
   """Adds functions to process image feature to builders.
 
   This function expects the input to be either a `tf.train.SequenceExample` (for
@@ -97,14 +101,14 @@ def add_image(
     output_feature_name: Name of the feature in the output features dictionary.
       Exposing this as an argument allows using this function for different
       image features within a single dataset.
-    is_training: Whether or not in training mode. If `True`, random sample, crop
-      and left right flip is used.
+    is_training: Whether in training mode. If `True`, random sample, crop and
+      left right flip is used.
     num_frames: Number of frames per subclip. For single images, use 1.
     stride: Temporal stride to sample frames.
     num_test_clips: Number of test clips (1 by default). If more than 1, this
       will sample multiple linearly spaced clips within each video at test time.
       If 1, then a single clip in the middle of the video is sampled. The clips
-      are aggreagated in the batch dimension.
+      are aggregated in the batch dimension.
     min_resize: Frames are resized so that `min(height, width)` is `min_resize`.
     crop_size: Final size of the frame after cropping the resized frames. Both
       height and width are the same.
@@ -114,8 +118,8 @@ def add_image(
       in sync between different modalities. All modalities having this option
       `True` will use the same outcome in random operations such as sampling and
       cropping.
-    is_rgb: If `True`, the number of channels in the JPEG is 3, if False, 1.
-      If is_flow is `True`, `is_rgb` should be set to `None` (see below).
+    is_rgb: If `True`, the number of channels in the JPEG is 3, if False, 1. If
+      is_flow is `True`, `is_rgb` should be set to `None` (see below).
     is_flow: If `True`, the image is assumed to contain flow and will be
       processed as such. Note that the number of channels in the JPEG for flow
       is 3, but only two channels will be output corresponding to the valid
@@ -123,6 +127,8 @@ def add_image(
     random_flip: If `True`, a random horizontal flip is applied to the input
       image. This augmentation may not be used if the label set contains
       direction related classes, such as `pointing left`, `pointing right`, etc.
+    normalization_mean: value to subtract from the input image to normalize it.
+    normalization_std: value to divide by from the input image to normalize it.
   """
 
   # Validate parameters.
@@ -189,7 +195,7 @@ def add_image(
   # Note that for flow, 3 channels are stored in the JPEG: the first two
   # corresponds to horizontal and vertical displacement, respectively.
   # The last channel contains zeros and is dropped later in the preprocessing.
-  # Hence the output number of channels for flow is 2.
+  # Hence, the output number of channels for flow is 2.
   num_raw_channels = 3 if (is_rgb or is_flow) else 1
   decoder_builder.add_fn(
       fn=lambda x: processors.decode_jpeg(x, channels=num_raw_channels),
@@ -257,8 +263,18 @@ def add_image(
         feature_name=output_feature_name,
         fn_name=f'{output_feature_name}_normalize')
 
+  preprocessor_builder.add_fn(
+      fn=lambda x: x - normalization_mean,
+      feature_name=output_feature_name,
+      fn_name=f'{output_feature_name}_subtract_given_mean')
+
+  preprocessor_builder.add_fn(
+      fn=lambda x: x / normalization_std,
+      feature_name=output_feature_name,
+      fn_name=f'{output_feature_name}_divide_by_given_std')
+
   if num_test_clips > 1 and not is_training:
-    # In this case, multiple clips are merged together in batch dimenstion which
+    # In this case, multiple clips are merged together in batch dimension which
     # will be `B * num_test_clips`.
     postprocessor_builder.add_fn(
         fn=lambda x: tf.reshape(  # pylint: disable=g-long-lambda
