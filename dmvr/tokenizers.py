@@ -15,7 +15,7 @@
 
 import abc
 import gzip
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 from clip import simple_tokenizer
 import tensorflow as tf
@@ -33,7 +33,7 @@ class TextTokenizer(abc.ABC):
 
   @abc.abstractmethod
   def string_tensor_to_indices(self,
-                               string_tensor: tf.Tensor,
+                               string_tensor: Union[tf.Tensor, Sequence[str]],
                                prepend_bos: bool = False,
                                append_eos: bool = False,
                                max_num_tokens: Optional[int] = 32) -> tf.Tensor:
@@ -117,7 +117,7 @@ class SentencePieceTokenizer(TextTokenizer):
           model=f.read(), out_type=tf.int32, add_bos=True, add_eos=True)
 
   def string_tensor_to_indices(self,
-                               string_tensor: tf.Tensor,
+                               string_tensor: Union[tf.Tensor, Sequence[str]],
                                prepend_bos: bool = False,
                                append_eos: bool = False,
                                max_num_tokens: Optional[int] = 32) -> tf.Tensor:
@@ -243,7 +243,7 @@ class WordTokenizer(TextTokenizer):
         self._unk_token)
 
   def string_tensor_to_indices(self,
-                               string_tensor: tf.Tensor,
+                               string_tensor: Union[tf.Tensor, Sequence[str]],
                                prepend_bos: bool = False,
                                append_eos: bool = False,
                                max_num_tokens: Optional[int] = 32) -> tf.Tensor:
@@ -376,7 +376,7 @@ class BertTokenizer(TextTokenizer):
         lower_case=True)
 
   def string_tensor_to_indices(self,
-                               string_tensor: tf.Tensor,
+                               string_tensor: Union[tf.Tensor, Sequence[str]],
                                prepend_bos: bool = False,
                                append_eos: bool = False,
                                max_num_tokens: Optional[int] = 32) -> tf.Tensor:
@@ -511,7 +511,7 @@ class ClipTokenizer(TextTokenizer):
         unknown_token=self.UNK)
 
   def string_tensor_to_indices(self,
-                               string_tensor: tf.Tensor,
+                               string_tensor: Union[tf.Tensor, Sequence[str]],
                                prepend_bos: bool = False,
                                append_eos: bool = False,
                                max_num_tokens: Optional[int] = 77) -> tf.Tensor:
