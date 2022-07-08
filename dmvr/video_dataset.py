@@ -287,7 +287,7 @@ class BaseVideoDatasetFactory(abc.ABC):
   # ----------------------------------------------------------------------
 
   @abc.abstractmethod
-  def _build(self, *args, **kwargs):
+  def _build(self, *args, **kwargs) -> None:
     """Builds the data processing graph."""
 
   # ----------------------------------------------------------------------
