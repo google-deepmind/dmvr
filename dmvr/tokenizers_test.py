@@ -127,8 +127,10 @@ class TokenizerTest(tf.test.TestCase):
     with self.assertRaises(RuntimeError):
       tokenizer.string_tensor_to_indices(input_string)
 
-  @parameterized.expand(
-      ((tokenizers.WordTokenizer,), (tokenizers.SentencePieceTokenizer,),))
+  @parameterized.expand((
+      (tokenizers.WordTokenizer,),
+      (tokenizers.SentencePieceTokenizer,),
+  ))
   def test_string_to_indices(self, cls):
     tokenizer = _get_tokenizer(cls)
     tokenizer.initialize()
@@ -146,37 +148,25 @@ class TokenizerTest(tf.test.TestCase):
   def test_clip_tokenizer(self):
     tokenizer = _get_tokenizer(tokenizers.ClipTokenizer)
     tokenizer.initialize()
-    input_string = ['This is a test.']
-    actual_tokenized_tf = tokenizer.string_tensor_to_indices(input_string,
-                                                             prepend_bos=True,
-                                                             append_eos=True,
-                                                             max_num_tokens=77)
-    actual_tokenized = actual_tokenized_tf.numpy().tolist()[0]
-    expected_tokenized = _tokenize_with_original_clip(input_string)[0]
+    input_string = ['This is a test.', 'pushups']
+    actual_tokenized_tf = tokenizer.string_tensor_to_indices(
+        input_string, prepend_bos=True, append_eos=True, max_num_tokens=77)
 
-    # Note the paddings are different.
-    actual_tokenized_without_padding = actual_tokenized[:actual_tokenized.index(
-        tokenizer.eos_token) + 1]
-    expected_tokenized_without_padding = expected_tokenized[:expected_tokenized.
-                                                            index((tokenizer.
-                                                                   eos_token)) +
-                                                            1]
-    self.assertEqual(actual_tokenized_without_padding,
-                     expected_tokenized_without_padding)
+    expected_tokenized = _tokenize_with_original_clip(input_string)
 
-    actual_decoded = tokenizer.indices_to_string(actual_tokenized)
-    expected_decoded = _decode_with_original_clip(expected_tokenized)
+    actual_tokenized1 = actual_tokenized_tf.numpy().tolist()[0]
+    expected_tokenized1 = expected_tokenized[0]
+    self.assertEqual(actual_tokenized1, expected_tokenized1)
 
-    # Our decoding implementation doesn't add the EoS token. Also,
-    # our implementation adds a space after the BoS token. So we just remove
-    # the special tokens altogether and strip spaces for simplicity.
-    actual_decoded_without_special_tokens = actual_decoded[len(
-        '<|startoftext|>'):].strip()
-    expected_decoded_without_special_tokens = expected_decoded[len(
-        '<|startoftext|>'):expected_decoded.index('<|endoftext|>')].strip()
+    actual_decoded = tokenizer.indices_to_string(actual_tokenized1)
+    self.assertEqual(actual_decoded, 'this is a test .')
 
-    self.assertEqual(actual_decoded_without_special_tokens,
-                     expected_decoded_without_special_tokens)
+    actual_tokenized2 = actual_tokenized_tf.numpy().tolist()[1]
+    expected_tokenized2 = expected_tokenized[1]
+    self.assertEqual(actual_tokenized2, expected_tokenized2)
+
+    actual_decoded = tokenizer.indices_to_string(actual_tokenized2)
+    self.assertEqual(actual_decoded, input_string[1])
 
 
 if __name__ == '__main__':

@@ -14,10 +14,9 @@
 """A simple tokenizer interface with basic implementations."""
 
 import abc
-import gzip
 from typing import Optional, Sequence, Union
 
-from clip import simple_tokenizer
+import clip.simple_tokenizer
 import tensorflow as tf
 import tensorflow_text
 
@@ -449,16 +448,7 @@ class ClipTokenizer(TextTokenizer):
 
   BOS = '<|startoftext|>'
   EOS = '<|endoftext|>'
-  # CLIP original tokenization method doesn't have an actual padding token. It
-  # uses 0 as the padding token ID, which actually corresponds to the token "!".
-  # Here we use the EoS token as the padding token because this interface
-  # needs to support tokenization without the EoS token, and we need to know
-  # which are the padding tokens.
-  PAD = EOS
   UNK = EOS
-
-  BERT_SUBWORD_PREFIX = '##'
-  CLIP_SUBWORD_SUFFIX = '</w>'
 
   def __init__(
       self,
@@ -469,58 +459,40 @@ class ClipTokenizer(TextTokenizer):
     Args:
       vocabulary_path: A path to a CLIP-style vocabulary file.
     """
-    vocabulary_path = vocabulary_path or simple_tokenizer.default_bpe()
+    self._tokenizer = clip.simple_tokenizer.SimpleTokenizer(vocabulary_path)
 
-    # Create TF tokenizer similar to google3/robotics/learning/clip/clip.py,
-    # which in turn is similar to
-    # https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py
-    vocab = simple_tokenizer.bytes_to_unicode().values()
-    vocab = [self.BERT_SUBWORD_PREFIX + t for t in vocab] + list(vocab)
+    self._vocab_size = len(self._tokenizer.encoder)
+    self._pad_token = 0
+    self._bos_token = self._tokenizer.encoder[self.BOS]
+    self._eos_token = self._tokenizer.encoder[self.EOS]
+    self._unk_token = self._tokenizer.encoder[self.UNK]
 
-    with tf.io.gfile.GFile(vocabulary_path, 'rb') as file:
-      merges = gzip.open(file).read().decode('utf-8').split('\n')
-    for merge in merges[1:49152 - 256 - 2 + 1]:
-      clip_like_token = ''.join(merge.split())
-      if clip_like_token.endswith(self.CLIP_SUBWORD_SUFFIX):
-        bert_like_token = clip_like_token[:-len(self.CLIP_SUBWORD_SUFFIX)]
-      else:
-        bert_like_token = self.BERT_SUBWORD_PREFIX + clip_like_token
-      vocab.append(bert_like_token)
-
-    vocab.extend([self.BOS, self.EOS])
-
-    self._idx2word = vocab
-    self._word2idx = {word: i for i, word in enumerate(vocab)}
-
-    self._vocab_size = len(vocab)
-    self._pad_token = self._word2idx[self.PAD]
-    self._bos_token = self._word2idx[self.BOS]
-    self._eos_token = self._word2idx[self.EOS]
-    self._unk_token = self._word2idx[self.UNK]
-
-    self._tf_tokenizer = None
+    self._initialized = False
 
   def initialize(self) -> None:
-    vocab_lookup_table = tf.lookup.StaticVocabularyTable(
-        num_oov_buckets=1,
-        initializer=tf.lookup.KeyValueTensorInitializer(
-            keys=self._idx2word,
-            values=tf.range(len(self._idx2word), dtype=tf.int64)))
-    self._tf_tokenizer = tensorflow_text.BertTokenizer(
-        vocab_lookup_table, token_out_type=tf.int32, lower_case=True,
-        unknown_token=self.UNK)
+    self._initialized = True
+
+  def _clip_tokenize(self, texts: Union[tf.Tensor,
+                                        Sequence[str]]) -> tf.RaggedTensor:
+    if isinstance(texts, tf.Tensor):
+      texts = [text.decode('utf-8') for text in texts._numpy().tolist()]  # pylint: disable=protected-access
+    return tf.ragged.constant([self._tokenizer.encode(text) for text in texts],
+                              dtype=tf.int32)
 
   def string_tensor_to_indices(self,
                                string_tensor: Union[tf.Tensor, Sequence[str]],
                                prepend_bos: bool = False,
                                append_eos: bool = False,
                                max_num_tokens: Optional[int] = 77) -> tf.Tensor:
-    if self._tf_tokenizer is None:
+    if not self._initialized:  # To satisfy the tests.
       raise RuntimeError('Model was not initialized. Call `initialize` method.')
 
     batch_size = tf.shape(input=string_tensor)[0]
-    tokenized = self._tf_tokenizer.tokenize(string_tensor)
-    tokenized = tokenized.merge_dims(-2, -1)
+
+    tokenized = tf.py_function(
+        func=self._clip_tokenize,
+        inp=[string_tensor],
+        Tout=tf.RaggedTensorSpec([None, None], dtype=tf.int32))
 
     if append_eos:
       eos_tensor = tf.ragged.constant([self._eos_token])
@@ -535,25 +507,13 @@ class ClipTokenizer(TextTokenizer):
 
     # Pad to `max_num_tokens`.
     shape = None if max_num_tokens is None else [None, max_num_tokens]
-    tokenized = tokenized.to_tensor(default_value=self._pad_token, shape=shape)
-    return tokenized
+    return tokenized.to_tensor(default_value=self._pad_token, shape=shape)
 
   def indices_to_string(self, indices: Sequence[int]) -> str:
-    # Cut at `EOS` or `PAD`.
-    # CLIP original decoding includes the EoS token in the output, which we
-    # don't do here. If we did so and the indices don't contain a EoS token, but
-    # it contains padding, we'd be adding an extra padding token at the end then
-    # because in this implementation the EoS and the padding token are the same.
-    # To avoid this situation, we just avoid including them in the output.
-    idx_list_cut = []
-    for token_id in indices:
-      if token_id in [self._pad_token, self._eos_token]:
-        break
-      idx_list_cut.append(token_id)
-
-    # Decode back to string.
-    words_iter = (self._idx2word[idx] for idx in idx_list_cut)
-    return ' '.join(words_iter).replace(' ##', '')
+    text = self._tokenizer.decode(i for i in indices if i != self._pad_token)
+    start_pos = len(self.BOS) if text.startswith(self.BOS) else 0
+    end_pos = text.index(self.EOS) if self.EOS in text else None
+    return text[start_pos:end_pos].strip()
 
   @property
   def vocab_size(self) -> int:
