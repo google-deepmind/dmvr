@@ -477,7 +477,7 @@ class ExampleParserBuilder(BaseParserBuilder):
     self._features = {}
     self._name_dict: Dict[str, List[str]] = {}
 
-  def parse_feature(
+  def parse_feature(  # pytype: disable=signature-mismatch  # overriding-parameter-type-checks
       self,
       feature_name: str,
       feature_type: Union[tf.io.VarLenFeature, tf.io.FixedLenFeature],
