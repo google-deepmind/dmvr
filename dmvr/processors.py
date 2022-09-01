@@ -749,6 +749,7 @@ def compute_audio_spectrogram(
     normalize: bool = False,
     audio_feature_name: str = builders.AUDIO_MEL_FEATURE_NAME,
     spectrogram_feature_name: str = builders.AUDIO_MEL_FEATURE_NAME,
+    fft_output_conversion: str = 'magnitude',
     ) -> builders.FeaturesDict:
   """Computes audio spectrograms.
 
@@ -771,6 +772,8 @@ def compute_audio_spectrogram(
     normalize: Whether to normalize the waveform or not.
     audio_feature_name: The name of the raw audio feature in features.
     spectrogram_feature_name: The name of the spectrogram feature in features.
+    fft_output_conversion: The string indicating the output conversion function.
+      Currently, only `magnitude` and `magnitude_squared` are supported.
 
   Returns:
     A FeaturesDict containing the extracted spectrograms.
@@ -782,6 +785,11 @@ def compute_audio_spectrogram(
   if spectrogram_type not in ['spectrogram', 'logmf', 'mfcc']:
     raise ValueError('Spectrogram type should be one of `spectrogram`, '
                      '`logmf`, or `mfcc`, got {}'.format(spectrogram_type))
+
+  if fft_output_conversion not in ['magnitude', 'magnitude_squared']:
+    raise ValueError(
+        'FFT output conversion should be one of `magnitude` or '
+        '`magnitude_squared, god {}`'.format(fft_output_conversion))
 
   raw_audio = features[audio_feature_name]
   if normalize:
@@ -802,6 +810,8 @@ def compute_audio_spectrogram(
                            fft_length=frame_length,
                            window_fn=tf.signal.hann_window,
                            pad_end=True)
+    if fft_output_conversion == 'magnitude_squared':
+      stfts = tf.square(stfts)
     spectrograms = tf.abs(stfts)
 
     if spectrogram_type == 'spectrogram':
